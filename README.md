@@ -4,9 +4,7 @@ Living documentation of the MCP (Model Context Protocol) deployment architecture
 
 This repository describes the **current** architecture. Dated snapshots of earlier iterations live under [`iterations/`](iterations/) — the README is kept clean of changelog so it always shows the latest model.
 
-![MCP Aggregation Architecture](diagrams/mcp-aggregation-architecture.png)
-
-> **Note:** The diagram reflects the v1 (2026-04-26) model with a workstation-local aggregator and a lightweight HTTP staging service. The text below is the current (v2) model. The diagram will be refreshed in a future iteration.
+![MCP Deployment Architecture v2](diagrams/v2/1.png)
 
 ## What this repo is
 
@@ -98,6 +96,11 @@ This keeps any single client's context window free from hundreds of irrelevant t
 
 Dated snapshots of earlier versions of this architecture live in [`iterations/`](iterations/). See that folder's README for the index.
 
-## Diagram
+## Diagrams
 
-The architecture diagram (`diagrams/mcp-aggregation-architecture.png`) was created by Daniel Rosehill using Nano Banana 2 via Fal AI. It currently reflects the v1 model and will be refreshed in a future iteration.
+Diagrams are kept under [`diagrams/`](diagrams/), versioned in step with the iterations:
+
+- `diagrams/v2/1.png` — current architecture (header image above)
+- `diagrams/v1/` — earlier two-tier model with workstation-local aggregator and HTTP staging service
+
+All diagrams generated with **Nano Banana 2** (`fal-ai/nano-banana-2`) via Fal AI.
