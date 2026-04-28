@@ -4,7 +4,7 @@ Living documentation of the MCP (Model Context Protocol) deployment architecture
 
 This repository describes the **current** architecture. Dated snapshots of earlier iterations live under [`iterations/`](iterations/) — the README is kept clean of changelog so it always shows the latest model.
 
-![MCP Deployment Architecture v2](diagrams/v2/1.png)
+![MCP Deployment Architecture v2](diagrams/v2/1-clean.png)
 
 ### Anti-hairpin note
 
