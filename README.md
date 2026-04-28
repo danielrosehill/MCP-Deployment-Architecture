@@ -6,6 +6,12 @@ This repository describes the **current** architecture. Dated snapshots of earli
 
 ![MCP Deployment Architecture v2](diagrams/v2/1.png)
 
+### Anti-hairpin note
+
+LAN clients reach the LAN VM directly; the external hostname is resolved at the DNS level so traffic does not loop out through the tunnel and back in.
+
+![Anti-hairpin annotation](diagrams/v2/1-anti-hairpin.png)
+
 ## What this repo is
 
 This is a documentation repository, not a code repository. It captures the current shape of the deployment, the reasoning behind it, and — under `iterations/` — the trajectory.
