@@ -1,76 +1,103 @@
-# MCP Aggregation Architecture
+# MCP Deployment Architecture
 
-Documentation of the MCP (Model Context Protocol) aggregation architecture used across Daniel Rosehill's agentic AI setup.
+Living documentation of the MCP (Model Context Protocol) deployment architecture used across Daniel Rosehill's agentic AI setup.
+
+This repository describes the **current** architecture. Dated snapshots of earlier iterations live under [`iterations/`](iterations/) — the README is kept clean of changelog so it always shows the latest model.
 
 ![MCP Aggregation Architecture](diagrams/mcp-aggregation-architecture.png)
 
-## Architecture Overview
+> **Note:** The diagram reflects the v1 (2026-04-26) model with a workstation-local aggregator and a lightweight HTTP staging service. The text below is the current (v2) model. The diagram will be refreshed in a future iteration.
 
-This architecture uses a two-tier MCP aggregation model designed around three core principles: **client portability**, **location flexibility**, and **context load management**.
+## What this repo is
 
-## The Two Aggregators
+This is a documentation repository, not a code repository. It captures the current shape of the deployment, the reasoning behind it, and — under `iterations/` — the trajectory.
 
-### MCP Aggregation 1 (LAN VM) — Default
+The architecture is a **work in progress** that is updated periodically. Approaches change as MCP itself evolves and as the practical edges of file transfer, authentication, tool discovery, and aggregation push back.
 
-The primary MCP aggregator runs on a local virtual machine on the LAN. This is the default destination for all MCP servers unless there is a specific reason to run them locally.
+## Goals
 
-MCP servers hosted here include connections to remote SaaS APIs (Google Workspace, Replicate, Pinecone, Meno) as well as infrastructure services running within the Docker network (PostgreSQL for conversation records, etc.).
+The end goal — not yet fully realised — is an MCP deployment **decoupled from any single agentic framework**. Today, much of it is consumed via Claude (Code and claude.ai), but the design intent is that the MCP servers, aggregation layer, and supporting services should be reusable from any compliant client.
 
-The aggregation layer used here is MCP Jungle (referenced in the diagram as "MCP Aggregation 1"; note: the project was formerly known as MetaMCP and is now called MCP Jungle).
+The recurring problem areas this architecture is trying to address:
 
-### MCP Aggregation 2 (Localhost) — Exception-Based
+- **File transfer** — MCP's JSON-RPC has no binary channel; tools that take file paths assume server-local filesystems.
+- **Authentication** — managing OAuth, tokens, and per-account scoping across many providers and machines.
+- **Tool discovery** — finding the right tool across dozens of servers without overwhelming the model's context.
+- **Aggregation vs. direct connection** — when to multiplex through an aggregator and when a direct client connection is simpler.
 
-A second MCP aggregator runs on the local desktop machine. This is used only when one of the following conditions applies:
+## Current architecture
 
-- The MCP **requires local device access** to function (e.g., Blender MCP, Revit MCP, or any tool that drives local desktop software).
-- The MCP **does not support file transfer to a remote** and needs direct filesystem access.
-- The MCP is **too cumbersome to configure remotely** (e.g., a transcription MCP that expects local audio hardware or file paths).
+### Single LAN aggregator
 
-If none of these conditions apply, the MCP belongs on the LAN VM, not localhost.
+A single MCP aggregator runs on a virtual machine on the LAN. It is the destination for all MCP servers unless one truly cannot run remotely.
 
-## Remote Access
+Hosts connections to remote SaaS APIs (Google Workspace, Replicate, Pinecone, Meno, etc.) and to infrastructure services on the Docker network (e.g., PostgreSQL for conversation records). The aggregation layer is **MCP Jungle** (formerly MetaMCP).
 
-Access to the LAN VM's MCP aggregator from outside the local network is provided via:
+### Workstation — direct connections only
 
-- **Cloudflare Tunnels** — for stable, publicly-routable access without exposing ports.
-- **Tailscale** — for private mesh networking when on the move.
+There is **no workstation-local aggregator**. The desktop client makes **direct point-to-point connections** to the small set of servers that genuinely have to run locally:
 
-An **OpenClaw gateway** sits in front of the VM aggregator, handling routing for both local and remote clients.
+- MCPs that require **local device access** (e.g., Blender, Revit, anything driving local desktop software).
+- MCPs that need **direct local filesystem access** and have no remote-file-transfer story.
+- MCPs that are simply **too cumbersome to configure remotely** (e.g., transcription tools expecting local audio hardware).
 
-This means that regardless of whether the client is on the LAN or connecting from a remote location, the same MCP servers are reachable securely.
+Everything else lives on the LAN aggregator.
 
-## LAN Device Integration
+### File staging — MinIO on the LAN server
 
-Lightweight MCP servers run directly on local LAN devices such as:
+File transfer for MCP tools is handled by **MinIO** running on the LAN VM:
+
+- **S3-compatible API** accessible from inside and outside the LAN.
+- **Presigned URLs** for clients without filesystem access (phones, browsers, remote agents).
+- **Lifecycle / retention policies** auto-prune temporary staging artifacts so storage doesn't accumulate.
+
+This replaces an earlier lightweight HTTP staging microservice (see [`iterations/v1-2026-04-26.md`](iterations/v1-2026-04-26.md)).
+
+### Remote access
+
+Access to the LAN aggregator from outside the network:
+
+- **Cloudflare Tunnels** — stable, publicly-routable access without exposing ports.
+- **Tailscale** — private mesh networking when on the move.
+
+An **OpenClaw gateway** sits in front of the VM aggregator and handles routing for both local and remote clients. The same MCP servers are reachable whether the client is on the LAN or remote.
+
+### LAN device integration
+
+Lightweight MCP servers run directly on local LAN devices:
 
 - **Home Assistant** (home automation)
 - **NAS** (network storage)
 - **OPNsense** (firewall/router)
 - **SBC Aggregator** — a dedicated single-board computer that aggregates signals from other SBCs (RPi 1, RPi 2, etc.)
 
-These device-level MCPs feed into a **LAN Aggregator/Gateway**, which is then connected to MCP Aggregation 1 on the VM. This creates a clean separation: individual devices expose only their own tools, and the aggregator composes them into a unified interface.
+These device-level MCPs feed into a **LAN Aggregator/Gateway**, which connects upward into the VM aggregator. Devices expose only their own tools; the aggregator composes them into a unified interface.
 
-## Design Rationale
+## Design rationale
 
-### Client Portability
+### Client portability
 
-By centralising MCPs on a network-hosted VM rather than on any single client device, the tool surface is available to any AI client — desktop apps, CLI tools, remote agents — without per-client configuration. A new client just points at the aggregator.
+Centralising MCPs on a network-hosted VM rather than on any single client device means the tool surface is available to any compliant AI client — desktop apps, CLI tools, remote agents — without per-client configuration. New clients just point at the aggregator.
 
-### Location Flexibility
+### Location flexibility
 
-The Cloudflare + Tailscale access layer means MCP servers are reachable whether you're sitting at the desk on the LAN or working remotely. No VPN juggling or port forwarding required.
+The Cloudflare + Tailscale layer makes the same MCP servers reachable on the LAN or remotely, with no VPN juggling or port forwarding.
 
-### Mitigating Tool Bloat and Context Load
+### Mitigating tool bloat and context load
 
-The modular, hierarchical aggregation structure is deliberately designed to prevent tool bloat. Rather than loading every MCP tool into every client session:
+Hierarchical aggregation deliberately prevents tool bloat. Rather than loading every MCP tool into every client session:
 
 - LAN devices expose focused, narrow tool sets.
-- The LAN aggregator composes device tools into logical groups.
+- The LAN aggregator/gateway composes device tools into logical groups.
 - The VM aggregator presents a curated surface to clients.
-- The localhost aggregator handles only the exceptions that genuinely need local access.
+- The workstation handles only the exceptions that genuinely need local access — and now does so via direct connections rather than a second aggregator layer.
 
-This keeps any single client's context window free from hundreds of irrelevant tools and makes the overall system easier to reason about, debug, and extend.
+This keeps any single client's context window free from hundreds of irrelevant tools and makes the system easier to reason about, debug, and extend.
+
+## Iterations
+
+Dated snapshots of earlier versions of this architecture live in [`iterations/`](iterations/). See that folder's README for the index.
 
 ## Diagram
 
-The architecture diagram (`diagrams/mcp-aggregation-architecture.png`) was created by Daniel Rosehill using Nano Banana 2 via Fal AI.
+The architecture diagram (`diagrams/mcp-aggregation-architecture.png`) was created by Daniel Rosehill using Nano Banana 2 via Fal AI. It currently reflects the v1 model and will be refreshed in a future iteration.
