@@ -137,6 +137,82 @@ A multi-user, organizational or higher-consequence deployment should add, at min
 - auditable tool calls and approval gates for destructive or physical actions; and
 - an explicit policy for which prompts, resources and tools may traverse gateway boundaries.
 
+### Two reference network configurations
+
+The architecture now distinguishes a baseline deployment from its extended form.
+
+#### A. Single-site network
+
+One site gateway aggregates the MCP servers on one LAN. The operator's agent uses OpenViking to retrieve skills and management procedures, uses the toolbox to reveal only the selected tool schema, and invokes the tool through that gateway.
+
+```mermaid
+flowchart LR
+    User[Operator] --> Agent[AI agent]
+    Agent --> OV[OpenViking<br/>skills and management context]
+    Agent --> Box[Toolbox<br/>deferred schemas]
+    Box --> GW[Site MCP gateway]
+    GW --> HA[Home Assistant]
+    GW --> Infra[LAN infrastructure]
+    GW --> Devices[Local devices]
+```
+
+This is the v3-style single-network model expressed with the v4 distinction between procedural discovery, schema discovery and execution.
+
+#### B. Extended managed-site network
+
+The extended model repeats the same site unit behind a primary management surface. Each on-prem location has a site gateway and, in the idealized design, a site-local OpenViking instance. The primary gateway registers each site gateway as one upstream. Gateway-to-gateway execution runs over **Tailscale**, where machine identity authenticates the peers and restrictive ACLs or grants authorize only the necessary source, destination and port.
+
+```mermaid
+flowchart LR
+    Agent[AI agent] --> POV[Primary OpenViking<br/>global capability tree]
+    Agent --> Box[Toolbox]
+    Box --> PGW[Primary MCP gateway]
+
+    subgraph S1[Managed site 1]
+      OV1[Site OpenViking] -. skills, manifests,<br/>runbooks and health .-> GW1[Site MCP gateway]
+      GW1 --> T1[Local MCP servers]
+    end
+
+    subgraph SN[Managed site N]
+      OVN[Site OpenViking] -. skills, manifests,<br/>runbooks and health .-> GWN[Site MCP gateway]
+      GWN --> TN[Local MCP servers]
+    end
+
+    OV1 -. ingest abstracts .-> POV
+    OVN -. ingest abstracts .-> POV
+    PGW -->|MCP over tailnet<br/>device identity + ACL| GW1
+    PGW -->|MCP over tailnet<br/>device identity + ACL| GWN
+```
+
+The number of managed sites is logically unbounded: each new site contributes one gateway upstream, one origin prefix and one capability subtree. “Unbounded” is a topology property, not a claim of infinite operational capacity. Real limits appear in catalog cardinality, synchronization lag, ACL and credential administration, observability, latency, upgrade coordination and failure isolation.
+
+The current Orange Pi does **not** run site-local OpenViking because of memory pressure. The diagram intentionally documents the target architecture rather than freezing that hardware compromise into the design.
+
+OpenViking does not need to proxy tool execution. It is the progressive discovery and management-knowledge plane:
+
+- each site publishes capability manifests, skills, runbooks, naming/provenance and health or recovery context;
+- an ingest process mirrors lightweight site abstracts and selected resources into the primary OpenViking tree;
+- the agent searches one global tree, then reads only the selected site's full procedure;
+- management skills identify the relevant gateway-admin tools and safe sequence, while those MCP tools—not OpenViking itself—perform registration, health checks or remediation; and
+- the site-local catalog remains usable by local agents when disconnected from the primary site.
+
+This synchronization is an architectural integration layer; it does not assume that OpenViking provides native multi-node federation or multi-master replication.
+
+### Progressive discovery to execution
+
+An idealized request flows as follows:
+
+1. The user states an intent to an AI agent without naming a site or tool.
+2. The agent searches the primary OpenViking catalog. It initially receives lightweight capability abstracts, site provenance, skill URIs and tool locators—not every runbook or schema.
+3. The agent reads the one selected skill. That resource supplies the procedure, constraints, required authorization surface, approval rules, verification steps and namespaced tool locator.
+4. If fresh site-specific state is required, the agent retrieves the relevant manifest or health context from the site management subtree.
+5. The agent uses the toolbox to list or resolve the candidate tool, requests only its detailed schema, and invokes it.
+6. The primary gateway enforces the user's namespace and routes the namespaced call over Tailscale to the chosen on-prem gateway.
+7. The site gateway invokes the local MCP server; the result returns along the same route.
+8. The agent verifies the outcome and may store a durable observation or improved procedure in OpenViking.
+
+The context expands progressively: **capability abstract → one skill → one schema → one result**. The agent never needs every site's tools, schemas and operational handbook in the active prompt.
+
 ## Design rationale
 
 ### Client portability
@@ -208,3 +284,16 @@ Diagrams are kept under [`diagrams/`](diagrams/), versioned in step with the ite
 - `diagrams/v1/` — earlier two-tier model with workstation-local aggregator and HTTP staging service
 
 v1–v3 diagrams were generated with **Nano Banana 2** (`fal-ai/nano-banana-2`) via Fal AI. v4 diagrams are reproducible Typst sources rendered with Typst 0.14.
+
+## Architecture as code
+
+The narrative and diagrams are backed by a versioned architecture model under [`architecture/`](architecture/):
+
+- [`architecture/v4/model.yaml`](architecture/v4/model.yaml) — canonical component, namespace, relationship, invariant and security model;
+- [`architecture/v4/topology.md`](architecture/v4/topology.md) — GitHub-rendered Mermaid deployment and control-flow view; and
+- [`architecture/v4/context-efficiency.md`](architecture/v4/context-efficiency.md) — GitHub-rendered Mermaid authorization and progressive-discovery view.
+- [`architecture/v4/single-site.md`](architecture/v4/single-site.md) — baseline single-network deployment;
+- [`architecture/v4/extended-sites.md`](architecture/v4/extended-sites.md) — idealized Tailscale-authenticated `N`-site deployment; and
+- [`architecture/v4/progressive-execution.md`](architecture/v4/progressive-execution.md) — sequence from user intent through discovery and execution.
+
+An ERD was considered but rejected because the important relationships are deployment, trust and control-flow relationships rather than relational data constraints. The YAML graph is the authoritative code representation; Mermaid and Typst are reviewable views, and the prose records rationale.

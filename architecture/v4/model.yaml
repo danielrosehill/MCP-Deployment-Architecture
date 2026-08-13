@@ -1,0 +1,246 @@
+schema_version: 1
+architecture:
+  id: mcp-deployment-architecture
+  version: v4
+  date: "2026-08-13"
+  status: current
+  scope: single-operator, federated-site MCP control surface
+  privacy:
+    remote_site_name: Burlington, Vermont
+    note: Pseudonym for the deployed U.S. site.
+
+reference_deployments:
+  - id: single_site
+    description: One gateway, one OpenViking context database, and one LAN control surface.
+  - id: extended_managed_sites
+    description: One primary management surface federating an arbitrary number of independently useful on-prem gateways over Tailscale.
+    idealized: true
+    note: Site-local OpenViking was not deployed on the current Orange Pi because of memory pressure; it remains part of the reference architecture.
+
+principals:
+  - id: primary_operator
+    kind: person
+    trust_level: owner
+  - id: household_user
+    kind: person
+    trust_level: scoped
+
+sites:
+  - id: primary_site
+    role: primary
+  - id: burlington_site
+    role: remote
+    display_name: Burlington, Vermont
+    pseudonymous: true
+
+components:
+  - id: operator_client
+    kind: mcp_client
+    site: variable
+    description: Laptop, phone, or agent used by the primary operator.
+
+  - id: primary_gateway
+    kind: mcp_gateway
+    implementation: MCP Jungle
+    site: primary_site
+    role: Primary operator-facing aggregation and routing surface.
+
+  - id: remote_gateway
+    kind: mcp_gateway
+    implementation: MCP Jungle
+    host: Orange Pi
+    site: burlington_site
+    role: Site-local aggregation and independent LAN control surface.
+
+  - id: toolbox
+    kind: meta_mcp
+    site: primary_site
+    role: Deferred tool discovery, schema retrieval, and invocation.
+    operations:
+      - list_servers
+      - list_tools
+      - describe_tools
+      - call_tool
+
+  - id: openviking
+    kind: context_database
+    implementation: OpenViking
+    site: primary_site
+    role: Progressive retrieval of skills, procedures, and conventions.
+    operations:
+      - find
+      - search
+      - read
+
+  - id: remote_openviking
+    kind: context_database
+    implementation: OpenViking
+    site: burlington_site
+    deployment_status: idealized_not_deployed
+    constraint: Omitted from the current Orange Pi because of memory pressure.
+    role: Site-local capability manifests, skills, runbooks, and management context.
+
+  - id: capability_ingest
+    kind: synchronization_service
+    role: Mirrors site capability abstracts and selected resources into the primary OpenViking tree.
+    implementation_status: architecture_pattern
+    note: Does not assume native OpenViking multi-node federation.
+
+  - id: primary_home_assistant
+    kind: mcp_server
+    site: primary_site
+    capability: physical_control
+
+  - id: remote_home_assistant
+    kind: mcp_server
+    site: burlington_site
+    capability: physical_control
+
+  - id: remote_host_control
+    kind: mcp_server
+    site: burlington_site
+    capability: host_root_control
+
+  - id: remote_label_printer
+    kind: mcp_server
+    site: burlington_site
+    capability: physical_output
+
+namespaces:
+  - id: personal_super_namespace
+    gateway: primary_gateway
+    principal: primary_operator
+    role: Broad default surface containing nearly the whole catalog.
+    context_policy: Breadth is accepted; schemas and procedures are deferred.
+
+  - id: scoped_household_namespace
+    gateway: primary_gateway
+    principal: household_user
+    role: Separate credential and policy surface for selected shared tools.
+    overlaps_with: personal_super_namespace
+
+  - id: toolbox_namespace
+    gateway: primary_gateway
+    role: Minimal bootstrap surface exposing only the toolbox meta-MCP.
+
+namespace_membership:
+  - namespace: personal_super_namespace
+    includes:
+      - primary_home_assistant
+      - remote_gateway
+      - toolbox
+      - openviking
+      - additional_personal_business_and_infrastructure_upstreams
+  - namespace: scoped_household_namespace
+    includes:
+      - primary_home_assistant
+      - selected_shared_utilities
+  - namespace: toolbox_namespace
+    includes:
+      - toolbox
+
+relationships:
+  - id: operator_connects_to_primary
+    from: operator_client
+    to: primary_gateway
+    protocol: MCP over streamable HTTP
+    via: personal_super_namespace
+
+  - id: primary_federates_remote
+    from: primary_gateway
+    to: remote_gateway
+    protocol: MCP over streamable HTTP
+    deployed_transport: Cloudflare Tunnel with Access service-token headers
+    preferred_owned_host_variant: Tailnet device identity with restrictive ACLs
+    provenance_prefix: burlington__
+
+  - id: site_context_ingests_to_primary
+    from: remote_openviking
+    to: capability_ingest
+    purpose: publish_site_capability_abstracts_and_selected_resources
+
+  - id: ingest_updates_global_catalog
+    from: capability_ingest
+    to: openviking
+    purpose: maintain_global_discovery_tree
+
+  - id: site_context_describes_gateway
+    from: remote_openviking
+    to: remote_gateway
+    purpose: document_capabilities_management_runbooks_and_health_context
+
+  - id: remote_fans_out_to_ha
+    from: remote_gateway
+    to: remote_home_assistant
+    scope: remote LAN
+    provenance_prefix: home-assistant__
+
+  - id: remote_fans_out_to_host
+    from: remote_gateway
+    to: remote_host_control
+    scope: remote host/container network
+    provenance_prefix: box-control__
+
+  - id: remote_fans_out_to_printer
+    from: remote_gateway
+    to: remote_label_printer
+    scope: remote LAN
+    provenance_prefix: label-printer__
+
+  - id: gateway_exposes_toolbox
+    from: primary_gateway
+    to: toolbox
+    purpose: progressive_tool_schema_discovery
+
+  - id: gateway_exposes_openviking
+    from: primary_gateway
+    to: openviking
+    purpose: progressive_procedural_context_retrieval
+
+invariants:
+  - Namespace membership governs reachability; it is not a context-loading control.
+  - Scoped namespaces may intentionally duplicate tools from the personal super-namespace.
+  - Toolbox governs deferred tool schema discovery and invocation.
+  - OpenViking governs deferred retrieval of procedures and conventions.
+  - OpenViking describes management intent and procedure; gateway administration tools perform management actions.
+  - A global OpenViking tree may ingest site-local abstracts without loading all site resources into an agent context.
+  - OpenViking multi-node synchronization requires an explicit ingest layer; native federation is not assumed.
+  - Remote tools retain both site and service prefixes to make the site of effect visible.
+  - A remote site remains locally useful if the WAN or primary site is unavailable.
+  - There should be only one primary-to-remote route for each consequential tool.
+
+security_posture:
+  accepted_for: One operator accepting a broad personal trust domain.
+  not_a_baseline_for:
+    - mutually untrusted users
+    - organizations
+    - regulated workloads
+    - safety-critical control
+  required_hardening_for_broader_use:
+    - least-privilege namespaces
+    - identity-aware authorization at each gateway
+    - restrictive network ACLs or grants
+    - per-site and per-principal credentials
+    - audit logs
+    - approval gates for consequential actions
+    - explicit cross-gateway policy for tools, prompts, and resources
+
+progressive_execution:
+  - step: 1
+    action: Agent searches the primary OpenViking tree with natural-language intent.
+    context_loaded: Capability abstracts only.
+  - step: 2
+    action: Agent reads one selected skill or management runbook.
+    context_loaded: Procedure, constraints, site provenance, and tool locator.
+  - step: 3
+    action: Agent asks the toolbox for the selected tool and schema.
+    context_loaded: Candidate names and one detailed input schema.
+  - step: 4
+    action: Primary gateway enforces the principal namespace and routes to the selected site gateway over Tailscale.
+    context_loaded: No additional catalog context.
+  - step: 5
+    action: Site gateway invokes the local MCP server and returns the result.
+    context_loaded: Tool result only.
+  - step: 6
+    action: Agent verifies the result and may persist a durable outcome or improved procedure to OpenViking.
+    context_loaded: Only the selected verification context.

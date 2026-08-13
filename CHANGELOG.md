@@ -17,6 +17,10 @@ links to its full snapshot under [`iterations/`](iterations/); the
 - **Clarified — two progressive-discovery mechanisms.** The toolbox progressively reveals and calls tool schemas; OpenViking progressively retrieves skills, procedures and conventions. Namespace breadth governs reachability and is independent of both.
 - **Added — explicit security limits.** The broad personal trust domain is an accepted single-user trade-off, not a general baseline for multi-user or high-consequence deployments.
 - **Added — reproducible diagrams.** v4 ships Typst source and rendered PNGs for the federated topology and context-efficiency model.
+- **Added — architecture as code.** A canonical YAML relationship graph and GitHub-native Mermaid views version the same topology, namespace model, invariants and security posture in reviewable source form.
+- **Added — two reference deployments.** The baseline is one gateway on one LAN; the extended model federates an arbitrary number of managed on-prem gateways over Tailscale with device identity and restrictive ACLs.
+- **Added — idealized per-site OpenViking.** Each site can carry local skills, capability manifests and management runbooks, whose abstracts are ingested into a primary global discovery tree. The current Pi's memory constraint is documented as an implementation exception, not an architectural limit.
+- **Added — discovery-to-execution sequence.** User intent expands progressively through a capability abstract, one selected skill, one selected tool schema, a policy-checked gateway route and one result.
 
 ## v3 — 2026-07-27
 
