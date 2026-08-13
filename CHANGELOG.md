@@ -4,6 +4,20 @@ What changed between versions of this architecture, newest first. Each entry
 links to its full snapshot under [`iterations/`](iterations/); the
 [README](README.md) always describes the current version only.
 
+## v4 — 2026-08-13
+
+[Full snapshot](iterations/v4-2026-08-13.md)
+
+**The control surface now federates an independently useful remote-site gateway, and the single-user context-efficiency model is made explicit.**
+
+- **Added — gateway-to-gateway site federation.** A remote Orange Pi gateway is registered as one upstream of the primary gateway and fans out locally to Home Assistant, host control and a label printer.
+- **Added — origin-preserving tool names.** Double prefixes such as `burlington__home-assistant__*` distinguish remote actions from equivalent tools at the primary site.
+- **Clarified — deployed transport versus preferred variant.** The live cross-site hop uses Cloudflare Access service-token headers; tailnet identity plus restrictive ACLs remains the preferred owned-host pattern when container DNS and addressing are dependable.
+- **Documented — super-namespace model.** The primary operator normally uses one broad namespace. Narrower namespaces intentionally overlap it to create separate authorization surfaces, not to organize tools or reduce prompt context.
+- **Clarified — two progressive-discovery mechanisms.** The toolbox progressively reveals and calls tool schemas; OpenViking progressively retrieves skills, procedures and conventions. Namespace breadth governs reachability and is independent of both.
+- **Added — explicit security limits.** The broad personal trust domain is an accepted single-user trade-off, not a general baseline for multi-user or high-consequence deployments.
+- **Added — reproducible diagrams.** v4 ships Typst source and rendered PNGs for the federated topology and context-efficiency model.
+
 ## v3 — 2026-07-27
 
 [Full snapshot](iterations/v3-2026-07-27.md)

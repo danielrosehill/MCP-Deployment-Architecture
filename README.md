@@ -4,9 +4,9 @@ Living documentation of the MCP (Model Context Protocol) deployment architecture
 
 This repository describes the **current** architecture. Dated snapshots of earlier iterations live under [`iterations/`](iterations/), and a version-to-version diff in [`CHANGELOG.md`](CHANGELOG.md) — the README is kept clean of changelog so it always shows the latest model.
 
-![MCP Deployment Architecture v3](diagrams/v3/1-clean.png)
+![Federated MCP control surface](diagrams/v4/1-federated-sites.png)
 
-**Current version: v3** ([snapshot](iterations/v3-2026-07-27.md)) — the overlay mesh is the backbone; the public tunnel is retained for third-party ingress; a skill server sits alongside the aggregator.
+**Current version: v4** ([snapshot](iterations/v4-2026-08-13.md)) — independently useful site gateways can federate into the primary gateway, while broad single-user reach is kept context-efficient through deferred tool discovery and OpenViking.
 
 ## What this repo is
 
@@ -27,11 +27,13 @@ The recurring problem areas this architecture is trying to address:
 
 ## Current architecture
 
-### Single LAN aggregator
+### Primary-site aggregator
 
-A single MCP aggregator runs on a virtual machine on the LAN. It is the destination for all MCP servers unless one truly cannot run remotely.
+A primary MCP aggregator runs on the home LAN. It is the default destination for SaaS, infrastructure and device-level MCP servers, and the normal connection point for the operator's clients.
 
 Hosts connections to remote SaaS APIs (Google Workspace, Replicate, Pinecone, Meno, etc.) and to infrastructure services on the Docker network (e.g., PostgreSQL for conversation records). The aggregation layer is **MCP Jungle** (formerly MetaMCP).
+
+The word *primary* is deliberate. v4 no longer assumes that one gateway must fan out directly to every device everywhere. A remote physical site may run its own small gateway and register that gateway as one upstream of the primary. The primary remains the operator-facing control surface; the remote gateway owns local fan-out and can remain useful to clients at that site if the WAN or primary site is unavailable.
 
 ### Workstation — direct connections only
 
@@ -53,24 +55,28 @@ File transfer for MCP tools is handled by **MinIO** running on the LAN VM:
 
 This replaces an earlier lightweight HTTP staging microservice (see [`iterations/v1-2026-04-26.md`](iterations/v1-2026-04-26.md)).
 
-### Skill server — progressive capability retrieval
+### Progressive discovery — toolbox and skill server
 
 An aggregated catalog large enough to be worth having is also large enough that loading every tool definition into every session becomes the dominant context cost. Configuring per project which servers to attach is the obvious alternative, and it is both time-consuming to maintain and inflexible the moment a session needs something the list did not anticipate.
 
-A **skill server** answers this from the other side. It holds capability definitions — skills, procedures, conventions — and serves them **on demand**: the agent searches for what the task needs and retrieves only that, rather than mounting everything up front.
+A **skill server** answers the procedural part of this problem. It holds skills, procedures and conventions and serves them **on demand**: the agent searches for what the task needs and retrieves only that, rather than mounting everything up front.
 
 The implementation in use is [**OpenViking**](https://github.com/volcengine/OpenViking), a context database that treats memory, resources and skills as a traversable filesystem addressed by `viking://` URIs, with tiered retrieval — abstracts first, full content only when asked for.
 
+Tool discovery itself uses a separate **toolbox meta-MCP**. Its four bootstrap tools let an agent list servers, list matching tools, request full schemas only for selected tools, and invoke them. OpenViking therefore does not replace the gateway or act as the tool router: it retrieves the know-how for using capabilities, while the toolbox progressively reveals and calls the capabilities themselves.
+
 **Skill server and aggregator are complementary, not competing:**
 
-| | **MCP aggregator** | **Skill server** |
-|---|---|---|
-| Supplies | Tools — the ability to *act* | Procedures — the judgement about *how* |
-| Answers | "What can I call?" | "How is this done here?" |
-| Loading | Tool definitions, resident in context | Retrieved on demand, transient |
-| Cost of breadth | Paid every session, in context | Paid only when retrieved |
+| | **MCP aggregator** | **Toolbox** | **OpenViking** |
+|---|---|---|---|
+| Supplies | Reachable tools | Deferred tool discovery and invocation | Procedures and conventions |
+| Answers | "What am I allowed to reach?" | "What can I call for this task?" | "How is this done here?" |
+| Loading | Namespace exposes the reachable catalog | Selected schemas retrieved on demand | Selected context retrieved on demand |
+| Cost of breadth | Tool names remain a known connection cost | Full schemas paid only when selected | Full procedure paid only when read |
 
-The aggregator gives breadth of access through one endpoint. The skill server gives depth of know-how without paying for it up front. A skill describing how to file an invoice is worthless without an invoicing tool to call; a large tool catalog with no procedural layer forces every session to rediscover the same sequences.
+The aggregator gives breadth of access through one endpoint. The toolbox keeps that breadth callable without mounting every detailed schema. OpenViking gives depth of know-how without paying for it up front. A skill describing how to file an invoice is worthless without an invoicing tool to call; a large tool catalog with no procedural layer forces every session to rediscover the same sequences.
+
+![Single-user namespace and discovery model](diagrams/v4/2-context-efficiency.png)
 
 ### Networking — mesh backbone, tunnel for third-party ingress
 
@@ -95,6 +101,42 @@ Lightweight MCP servers run directly on local LAN devices:
 
 These device-level MCPs feed into a **LAN Aggregator/Gateway**, which connects upward into the VM aggregator. Devices expose only their own tools; the aggregator composes them into a unified interface.
 
+### Federated remote-site gateways
+
+v4 extends the same composition pattern across geography. A small, independently administered site runs one MCP gateway close to its devices. The primary gateway registers the entire site gateway as a single upstream, so one cross-site connection carries the remote site's control surface and the remote gateway fans out locally.
+
+Using **Burlington, Vermont** as a pseudonym for the deployed U.S. site, an illustrative Home Assistant call is:
+
+```text
+operator → primary MCP gateway → remote-site upstream
+         → Burlington MCP gateway → Home Assistant MCP server → device
+```
+
+The deployed site gateway runs on an Orange Pi and currently fronts Home Assistant, host-control and label-printer tools. It remains directly usable on its own LAN; federation adds global reach without making local operation depend on the primary site.
+
+The outer gateway preserves the remote gateway's own tool prefix, producing names such as `burlington__home-assistant__HassTurnOff`. The double prefix is a safety property, not cosmetic namespacing: the primary gateway also has its own `home-assistant__*`, `box-control__*` and printer tools, so the site of effect must remain visible at selection and invocation time.
+
+Only the gateway-to-gateway hop crosses the wide-area link. This reduces configuration at the primary site, retains the remote site's internal grouping, and avoids multiple routes to the same consequential tool. It is mainly an availability and administrative-boundary pattern; measured transatlantic latency is well below the MCP initialization timeout and is not the architectural justification.
+
+#### The deployed path and the tailnet variant
+
+The current deployment reaches the remote gateway through a **Cloudflare Tunnel protected by an Access service token**. The Orange Pi also exposes the gateway on its tailnet address, but the primary gateway does not presently use that path because MagicDNS resolution from its container is unreliable and a changing tailnet IP would fail less clearly than an expired Access token.
+
+For two owned machines, a direct tailnet path remains the preferred generic variant when name resolution, stable addressing and ACLs are dependable. In that design the flow is authenticated by device identity and restricted by tailnet policy. Merely joining both machines to a default-allow tailnet should not be mistaken for application-level authorization.
+
+#### Security boundary and limits
+
+This deployment is optimized for one operator who accepts a large personal trust domain. A tailnet member or holder of the relevant service token may reach physical-control and, in some cases, host-root tools across sites. That is suitable here as a conscious personal trade-off; it is **not a generally viable security baseline**.
+
+A multi-user, organizational or higher-consequence deployment should add, at minimum:
+
+- least-privilege namespaces that exclude shell, router and unrelated site controls;
+- identity-aware authorization at each gateway, rather than treating network presence alone as sufficient;
+- restrictive tailnet ACLs or grants between named workloads and ports;
+- per-site and per-principal credentials with rotation and revocation;
+- auditable tool calls and approval gates for destructive or physical actions; and
+- an explicit policy for which prompts, resources and tools may traverse gateway boundaries.
+
 ## Design rationale
 
 ### Client portability
@@ -116,9 +158,23 @@ Two mechanisms attack this from opposite directions.
 - The VM aggregator presents a curated surface to clients.
 - The workstation handles only the exceptions that genuinely need local access — and now does so via direct connections rather than a second aggregator layer.
 
-**Progressive retrieval** reduces everything else. The skill server holds the instructions, conventions and worked sequences that would otherwise have to live in a permanently-loaded system prompt, and hands over only what the current task asks for.
+**Progressive retrieval** reduces everything else. The toolbox reveals detailed tool schemas only as they are selected, while OpenViking hands over only the instructions, conventions and worked sequences that the current task asks for.
 
 Together they keep a client's context window free of both hundreds of irrelevant tools and thousands of words of irrelevant procedure.
+
+### Single-user namespace model
+
+This deployment mostly serves one operator, so its default namespace behaves as a **super-namespace**: nearly every owned capability is reachable from one client connection, including the federated remote site. That breadth is intentional. It avoids per-project MCP declarations and allows an exploratory session to discover a capability that was not anticipated when the session began.
+
+A second, narrower namespace may intentionally duplicate some of those tools. The duplicate membership is not waste or a tool-organization technique; it creates a separate authentication and policy surface for another person or context. A household namespace, for example, can expose Home Assistant and shared utilities without exposing the operator's business, infrastructure or host-control catalog. The broad personal namespace does not need to shrink to make that possible.
+
+Three controls must remain distinct:
+
+1. **Namespace membership controls reachability.** It answers which principal or trust context may access a server or tool.
+2. **The toolbox controls schema loading.** A minimal four-tool endpoint progressively lists, describes and invokes tools from the broad catalog.
+3. **OpenViking controls procedural context.** It progressively retrieves the relevant skill, procedure or convention through `find`/`search` and `read`.
+
+The result is a wide control surface without requiring the full tool schemas and operational handbook to be resident in every prompt. There is still a known cost for advertising tool names in a broad namespace; clients requiring the smallest possible bootstrap context can connect to the toolbox-only namespace instead.
 
 ## Component map
 
@@ -127,11 +183,13 @@ The generic role, and what currently fills it:
 | Role | Implementation | Notes |
 |---|---|---|
 | MCP aggregation | [MCP Jungle](https://github.com/mcpjungle/mcpjungle) | One endpoint, per-upstream namespacing. Formerly MetaMCP. |
-| Skill server | [OpenViking](https://github.com/volcengine/OpenViking) | Progressive, on-demand retrieval; `viking://` URIs. |
+| Deferred tool discovery | Toolbox meta-MCP | Four bootstrap tools: list servers/tools, describe selected schemas, invoke. |
+| Skill server | [OpenViking](https://github.com/volcengine/OpenViking) | Progressive retrieval of skills, procedures and conventions; `viking://` URIs. |
 | Overlay mesh (backbone) | Tailscale | Default path between all owned machines. |
 | Public ingress | Cloudflare Tunnel + Access | For clients that can join neither the mesh nor send headers. |
 | File staging | MinIO | S3 API, presigned URLs, lifecycle policies. |
 | Device tier | Home Assistant, OPNsense, NAS, SBCs | Narrow, device-local tool sets. |
+| Remote-site tier | MCP Jungle on an Orange Pi | One site endpoint; local fan-out; origin-preserving double prefixes. |
 | Primary clients | Claude Code, claude.ai | Design intent is client-agnostic; see Goals. |
 
 ## Iterations
@@ -140,11 +198,13 @@ Dated snapshots of earlier versions of this architecture live in [`iterations/`]
 
 ## Diagrams
 
-Diagrams are kept under [`diagrams/`](diagrams/), versioned in step with the iterations:
+Diagrams are kept under [`diagrams/`](diagrams/), versioned in step with the iterations. v4 diagrams include editable Typst source alongside rendered PNGs:
 
-- `diagrams/v3/1-clean.png` — current architecture (header image above): mesh backbone, tunnel ingress, skill server alongside the aggregator
+- `diagrams/v4/1-federated-sites.typ` / `.png` — primary-to-remote gateway federation, local fan-out and trust warning
+- `diagrams/v4/2-context-efficiency.typ` / `.png` — super-namespace, overlapping auth surface, toolbox and OpenViking
+- `diagrams/v3/1-clean.png` — v3 architecture: mesh backbone, tunnel ingress, skill server alongside the aggregator
 - `diagrams/v3/2-single-server-variant.png` — same model drawn with the aggregator and skill server on one host, which is how they are in fact co-located
 - `diagrams/v2/` — tunnel-and-mesh-as-peers model, with the split-horizon anti-hairpin annotation
 - `diagrams/v1/` — earlier two-tier model with workstation-local aggregator and HTTP staging service
 
-All diagrams generated with **Nano Banana 2** (`fal-ai/nano-banana-2`) via Fal AI.
+v1–v3 diagrams were generated with **Nano Banana 2** (`fal-ai/nano-banana-2`) via Fal AI. v4 diagrams are reproducible Typst sources rendered with Typst 0.14.
